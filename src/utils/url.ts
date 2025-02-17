@@ -48,7 +48,7 @@ const replaceGroupMarks = (paths: string[], groups: [string, string][]): string[
 }
 
 const patternCache: { [key: string]: Pattern } = {}
-export const getPattern = (label: string): Pattern | null => {
+export const getPattern = (label: string, next?: string): Pattern | null => {
   // *            => wildcard
   // :id{[0-9]+}  => ([0-9]+)
   // :id          => (.+)
@@ -59,15 +59,19 @@ export const getPattern = (label: string): Pattern | null => {
 
   const match = label.match(/^\:([^\{\}]+)(?:\{(.+)\})?$/)
   if (match) {
-    if (!patternCache[label]) {
+    const cacheKey = `${label}#${next}`
+    if (!patternCache[cacheKey]) {
       if (match[2]) {
-        patternCache[label] = [label, match[1], new RegExp('^' + match[2] + '$')]
+        patternCache[cacheKey] =
+          next && next[0] !== ':' && next[0] !== '*'
+            ? [cacheKey, match[1], new RegExp(`^${match[2]}(?=/${next})`)]
+            : [label, match[1], new RegExp(`^${match[2]}$`)]
       } else {
-        patternCache[label] = [label, match[1], true]
+        patternCache[cacheKey] = [label, match[1], true]
       }
     }
 
-    return patternCache[label]
+    return patternCache[cacheKey]
   }
 
   return null
@@ -132,36 +136,27 @@ export const getPathNoStrict = (request: Request): string => {
   return result.length > 1 && result.at(-1) === '/' ? result.slice(0, -1) : result
 }
 
-export const mergePath = (...paths: string[]): string => {
-  let p: string = ''
-  let endsWithSlash = false
-
-  for (let path of paths) {
-    /* ['/hey/','/say'] => ['/hey', '/say'] */
-    if (p.at(-1) === '/') {
-      p = p.slice(0, -1)
-      endsWithSlash = true
-    }
-
-    /* ['/hey','say'] => ['/hey', '/say'] */
-    if (path[0] !== '/') {
-      path = `/${path}`
-    }
-
-    /* ['/hey/', '/'] => `/hey/` */
-    if (path === '/' && endsWithSlash) {
-      p = `${p}/`
-    } else if (path !== '/') {
-      p = `${p}${path}`
-    }
-
-    /* ['/', '/'] => `/` */
-    if (path === '/' && p === '') {
-      p = '/'
-    }
+/**
+ * Merge paths.
+ * @param {string[]} ...paths - The paths to merge.
+ * @returns {string} The merged path.
+ * @example
+ * mergePath('/api', '/users') // '/api/users'
+ * mergePath('/api/', '/users') // '/api/users'
+ * mergePath('/api', '/') // '/api'
+ * mergePath('/api/', '/') // '/api/'
+ */
+export const mergePath: (...paths: string[]) => string = (
+  base: string | undefined,
+  sub: string | undefined,
+  ...rest: string[]
+): string => {
+  if (rest.length) {
+    sub = mergePath(sub as string, ...rest)
   }
-
-  return p
+  return `${base?.[0] === '/' ? '' : '/'}${base}${
+    sub === '/' ? '' : `${base?.at(-1) === '/' ? '' : '/'}${sub?.[0] === '/' ? sub.slice(1) : sub}`
+  }`
 }
 
 export const checkOptionalParameter = (path: string): string[] | null => {
